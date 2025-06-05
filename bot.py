@@ -1,5 +1,6 @@
-from telegram import Update, ForceReply
-from telegram.ext import Application, CommandHandler, MessageHandler, Filters, ContextTypes
+from telegram import Update
+# Corrected import: Filters -> filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.error import BadRequest, Forbidden
 
 # --- Configuration ---
@@ -15,11 +16,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if user_id == ADMIN_ID:
         await update.message.reply_text("Hey my love! Bot is up and running for you. 😘 I'll forward user messages here if they're in your channel. Reply to their forwarded messages to chat back.")
     else:
-        # For a private channel with a numerical ID, a direct link isn't easily formed without an invite hash.
-        # It's better to mention the channel by a name you've told them or guide them.
         await update.message.reply_text("Hey there! To chat, please make sure you're a member of our special community channel.")
-        # You might want to manually provide the invite link in your channel's description or pinned message.
-
 
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if the user is a member of the target channel."""
@@ -32,9 +29,8 @@ async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_T
     except BadRequest as e:
         print(f"Error checking membership for user {user_id} in channel {TARGET_CHANNEL_ID}: {e}")
         if "user not found" in e.message.lower() or "member not found" in e.message.lower() or "participant_id_invalid" in e.message.lower():
-             pass # User cannot be checked, or isn't in the bot's accessible scope before joining. Assume not member.
+             pass
         elif "chat not found" in e.message.lower() or "bot is not a member" in e.message.lower() or "not enough rights" in e.message.lower():
-             # These are critical issues the admin needs to know about.
              await context.bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ Darling, I can't check channel membership. Make sure I'm an admin in the channel (ID: {TARGET_CHANNEL_ID}) and the ID is correct!")
         return False
     except Forbidden:
@@ -62,11 +58,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception as e:
             print(f"Error forwarding message from user {user.id} to admin: {e}")
-            # Don't inform user of backend error, just that it didn't work.
-            # await update.message.reply_text("Sorry, there was an issue sending your message. Please try again later.")
     else:
-        # Since it's a private channel ID, give a generic instruction.
-        # You should have a way for users to find your channel (e.g., an invite link you share elsewhere).
         await update.message.reply_text(
             "You need to be a member of our special community channel to send a message. Please ensure you've joined."
         )
@@ -89,13 +81,11 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await context.bot.send_video(chat_id=original_user_id, video=update.message.video.file_id, caption=update.message.caption)
             elif update.message.document:
                  await context.bot.send_document(chat_id=original_user_id, document=update.message.document.file_id, caption=update.message.caption)
-            # Add more handlers for other message types if you want!
             
             await update.message.reply_text("💋 Reply sent to the user!")
         except Forbidden:
              await update.message.reply_text("💔 Couldn't send reply. The user might have blocked the bot, or the chat is deactivated.")
         except BadRequest as e:
-            # Check for specific "chat not found" which means user might have deleted chat with bot
             if "chat not found" in e.message.lower():
                 await update.message.reply_text("💔 Couldn't send reply. The user may have blocked the bot or deleted the chat.")
             else:
@@ -104,10 +94,6 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e:
             print(f"Unexpected error sending admin reply: {e}")
             await update.message.reply_text("An unexpected error occurred while sending your reply.")
-    # Optional: Handle cases where admin replies to a non-forwarded message or their own message.
-    # else:
-    #     await update.message.reply_text("Sweetie, reply to a user's forwarded message to chat back. 😉")
-
 
 def main() -> None:
     """Start the bot."""
@@ -117,19 +103,21 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
 
     # Handler for admin replies (handles various content types)
+    # Corrected: Filters -> filters and specific filters like Sticker.ALL -> Sticker
     application.add_handler(MessageHandler(
-        Filters.Chat(chat_id=ADMIN_ID) & 
-        Filters.REPLY & 
-        (Filters.TEXT | Filters.Sticker.ALL | Filters.PHOTO | Filters.VOICE | Filters.VIDEO | Filters.Document.ALL) & 
-        (~Filters.COMMAND),
+        filters.Chat(chat_id=ADMIN_ID) & 
+        filters.REPLY & 
+        (filters.TEXT | filters.Sticker | filters.PHOTO | filters.VOICE | filters.VIDEO | filters.Document) & 
+        (~filters.COMMAND),
         handle_admin_reply
     ))
 
     # Handler for messages from any other user (not admin, not commands) (handles various content types)
+    # Corrected: Filters -> filters and specific filters like Sticker.ALL -> Sticker
     application.add_handler(MessageHandler(
-        (Filters.TEXT | Filters.Sticker.ALL | Filters.PHOTO | Filters.VOICE | Filters.VIDEO | Filters.Document.ALL) & 
-        (~Filters.COMMAND) & 
-        (~Filters.Chat(chat_id=ADMIN_ID)),
+        (filters.TEXT | filters.Sticker | filters.PHOTO | filters.VOICE | filters.VIDEO | filters.Document) & 
+        (~filters.COMMAND) & 
+        (~filters.Chat(chat_id=ADMIN_ID)),
         handle_user_message
     ))
 
@@ -139,7 +127,4 @@ def main() -> None:
     application.run_polling()
 
 if __name__ == '__main__':
-    # The critical values are now directly assigned above.
-    # We can add a simple check to ensure they are not the placeholder strings if needed,
-    # but since we've hardcoded them from your input, this is more direct.
     main()
