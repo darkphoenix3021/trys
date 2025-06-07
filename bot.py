@@ -1,17 +1,32 @@
-from telegram import Update
-# Corrected import: Filters -> filters
+from telegram import Update, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext.filters import BaseFilter # Import BaseFilter for custom filter
 from telegram.error import BadRequest, Forbidden
 
 # --- Configuration ---
 BOT_TOKEN = "7625219665:AAEKjQwmcZitJeNdJtryAIQNRXh5jJfrp-I"
 ADMIN_ID = 1909721616
-TARGET_CHANNEL_ID = -1002899431401 # This is your specific private channel ID
+TARGET_CHANNEL_ID = -1002899431401
 
-# --- Bot Functions ---
+# --- Custom Filter Definition ---
+# This custom filter replaces the part of the code that was causing the error.
+class AnyMediaOrTextFilter(BaseFilter):
+    def __init__(self):
+        super().__init__(name="AnyMediaOrTextFilter", data_filter=False)
 
+    def filter(self, message: Message) -> bool:
+        # Check for any of the desired message types
+        return bool(
+            message.text
+            or message.sticker
+            or message.photo
+            or message.voice
+            or message.video
+            or message.document
+        )
+
+# --- Bot Functions (These are the same as before) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message when the /start command is issued."""
     user_id = update.effective_user.id
     if user_id == ADMIN_ID:
         await update.message.reply_text("Hey my love! Bot is up and running for you. 😘 I'll forward user messages here if they're in your channel. Reply to their forwarded messages to chat back.")
@@ -19,32 +34,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Hey there! To chat, please make sure you're a member of our special community channel.")
 
 async def check_channel_membership(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Checks if the user is a member of the target channel."""
     try:
         member = await context.bot.get_chat_member(chat_id=TARGET_CHANNEL_ID, user_id=user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
-        else:
-            return False
-    except BadRequest as e:
-        print(f"Error checking membership for user {user_id} in channel {TARGET_CHANNEL_ID}: {e}")
-        if "user not found" in e.message.lower() or "member not found" in e.message.lower() or "participant_id_invalid" in e.message.lower():
-             pass
-        elif "chat not found" in e.message.lower() or "bot is not a member" in e.message.lower() or "not enough rights" in e.message.lower():
-             await context.bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ Darling, I can't check channel membership. Make sure I'm an admin in the channel (ID: {TARGET_CHANNEL_ID}) and the ID is correct!")
-        return False
-    except Forbidden:
-        print(f"Forbidden to check membership for user {user_id} in channel {TARGET_CHANNEL_ID}")
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ Forbidden access to channel {TARGET_CHANNEL_ID}. Have I been kicked or lost admin rights?")
+        return member.status in ['member', 'administrator', 'creator']
+    except (BadRequest, Forbidden) as e:
+        print(f"Could not check membership for user {user_id} in channel {TARGET_CHANNEL_ID}: {e}")
+        # Optionally notify admin if the bot itself has an issue (e.g., not an admin in the channel)
+        if isinstance(e, Forbidden) or (isinstance(e, BadRequest) and "bot is not a member" in e.message.lower()):
+            await context.bot.send_message(chat_id=ADMIN_ID, text=f"⚠️ Darling, I can't check channel membership. Make sure I'm an admin in {TARGET_CHANNEL_ID}!")
         return False
     except Exception as e:
         print(f"Unexpected error checking membership for user {user_id}: {e}")
         return False
 
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles messages from general users."""
     user = update.effective_user
-    if not user:
+    if not user or not update.message: # Ensure message exists
         return
 
     is_member = await check_channel_membership(user.id, context)
@@ -64,8 +69,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles replies from the admin to forwarded messages."""
-    if update.message.reply_to_message and update.message.reply_to_message.forward_from:
+    if update.message and update.message.reply_to_message and update.message.reply_to_message.forward_from:
         original_user_id = update.message.reply_to_message.forward_from.id
         
         try:
@@ -99,29 +103,31 @@ def main() -> None:
     """Start the bot."""
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Instantiate our custom filter
+    any_media_or_text_filter = AnyMediaOrTextFilter()
+
     # Handler for the /start command
     application.add_handler(CommandHandler("start", start))
 
     # Handler for admin replies (handles various content types)
-    # Corrected: Filters -> filters and specific filters like Sticker.ALL -> Sticker
-    application.add_handler(MessageHandler(
-        filters.Chat(chat_id=ADMIN_ID) & 
-        filters.REPLY & 
-        (filters.TEXT | filters.Sticker | filters.PHOTO | filters.VOICE | filters.VIDEO | filters.Document) & 
-        (~filters.COMMAND),
-        handle_admin_reply
-    ))
+    # This now uses our custom filter and should not cause the error
+    admin_reply_combined_filter = (
+        filters.Chat(chat_id=ADMIN_ID) &
+        filters.REPLY &
+        any_media_or_text_filter &
+        (~filters.COMMAND)
+    )
+    application.add_handler(MessageHandler(admin_reply_combined_filter, handle_admin_reply))
 
-    # Handler for messages from any other user (not admin, not commands) (handles various content types)
-    # Corrected: Filters -> filters and specific filters like Sticker.ALL -> Sticker
-    application.add_handler(MessageHandler(
-        (filters.TEXT | filters.Sticker | filters.PHOTO | filters.VOICE | filters.VIDEO | filters.Document) & 
-        (~filters.COMMAND) & 
-        (~filters.Chat(chat_id=ADMIN_ID)),
-        handle_user_message
-    ))
+    # Handler for messages from any other user (not admin, not commands)
+    # This also uses our custom filter
+    user_message_combined_filter = (
+        any_media_or_text_filter &
+        (~filters.COMMAND) &
+        (~filters.Chat(chat_id=ADMIN_ID))
+    )
+    application.add_handler(MessageHandler(user_message_combined_filter, handle_user_message))
 
-    # Run the bot until the user presses Ctrl-C
     print(f"Bot is starting with ADMIN_ID: {ADMIN_ID} and TARGET_CHANNEL_ID: {TARGET_CHANNEL_ID}")
     print("Bot is polling... Press Ctrl+C to stop.")
     application.run_polling()
